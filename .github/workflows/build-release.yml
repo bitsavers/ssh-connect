@@ -1,0 +1,85 @@
+name: Build win
+
+on:
+  # https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#example-of-onworkflow_dispatchinputs
+  # https://github.com/orgs/community/discussions/26322
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.100)'
+        required: true
+        default: '1.105'
+        type: string
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dist:
+          - {
+              arch: x86,
+              type: native
+            }
+          - {
+              arch: x64,
+              type: native
+            }
+          - {
+              arch: arm64,
+              type: cross
+            }
+    steps:
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
+      with:
+        ref: main
+        fetch-depth: 1
+        path: ./
+    #
+    # - name: Set up MinGW
+    #   run: sudo apt-get install -y mingw-w64
+    #
+    # - name: Compile win
+    #   run: x86_64-w64-mingw32-gcc -o connect.exe connect.c -lws2_32 -lwsock32 -liphlpapi
+
+    - name: Setup MSVC ENV
+      if: matrix.dist.type == 'native'
+      uses: TheMrMilchmann/setup-msvc-dev@v3
+      with:
+        arch: ${{ matrix.dist.arch }}
+
+    - name: Setup MSVC ENV
+      if: matrix.dist.type == 'cross'
+      uses: TheMrMilchmann/setup-msvc-dev@v3
+      with:
+        arch: amd64_${{ matrix.dist.arch }}
+
+    - name: Compile win
+      run: |
+        ${{ github.workspace }}/make.bat
+      env:
+        COMPILER: msc
+
+    - name: ls -la
+      shell: pwsh
+      run: |
+        Get-ChildItem -Path "${{ github.workspace }}" -Force
+
+    - name: Package
+      shell: pwsh
+      run: |
+        Compress-Archive -Path "${{ github.workspace }}//connect.exe" -DestinationPath "${{ github.workspace }}//connect-win-${{ matrix.dist.arch }}.zip"
+
+    - name: Upload binaries to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ github.token }}
+        file: ${{ github.workspace }}/connect-win-${{ matrix.dist.arch }}.zip
+        tag: ${{ github.event.inputs.version }}-${{ github.run_number }}
+        file_glob: true
+        release_name: 'Release v${{ github.event.inputs.version }}-${{ github.run_number }}'
+        overwrite: true
+        prerelease: false
+        body: 'Release of win latest'
